@@ -1,0 +1,12 @@
+{
+  "name": "cloudflare-tracker",
+  "version": "1.0.0",
+  "description": "Advanced data collector for Cloudflare Workers",
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
