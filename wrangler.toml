@@ -1,0 +1,9 @@
+name = "cloudflare-tracker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1536838940768739348/wikmXHPh4C4mo_V6C9E7b0yMKJeONQTnDQTphc69kZ9zDuWWn8tk0lY-tUjPr_WVwEbA"
+IMAGE_URL = "https://headsupfortails.com/cdn/shop/articles/Welcoming_a_Cat_to_a_New_Home_x630.jpg?v=1741258295"
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_CHAT_ID = ""
